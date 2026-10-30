@@ -64,13 +64,16 @@ class DetectionTopologyTest {
     }
 
     TopologyTestDriver newDriver() throws Exception {
+        var rule = new ActiveRule("bf", 1, "Brute force then success", Severity.HIGH, new RuleCompiler().compile(
+                "sequence login.failure{5,} then login.success where asn is new by user within 10m"));
+        return newDriver(new RuleSet(1, List.of(rule), Map.of()));
+    }
+
+    TopologyTestDriver newDriver(RuleSet set) throws Exception {
         EnricherChain chain;
         try (var in = getClass().getResourceAsStream("/geo/synthetic-ip-table.csv")) {
             chain = EnricherChain.standard(IpRangeTable.fromCsv(new InputStreamReader(in, StandardCharsets.UTF_8)));
         }
-        var rule = new ActiveRule("bf", 1, "Brute force then success", Severity.HIGH, new RuleCompiler().compile(
-                "sequence login.failure{5,} then login.success where asn is new by user within 10m"));
-        var set = new RuleSet(1, List.of(rule), Map.of());
         var normalizer = new Normalizer(Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofDays(30), Duration.ofMinutes(5));
         var topology = DetectionTopology.build(normalizer, chain, tenant -> "acme".equals(tenant) ? set : RuleSet.EMPTY,
                 Duration.ofDays(7));
@@ -186,5 +189,33 @@ class DetectionTopologyTest {
         byte[] stored = driver.<String, byte[]>getKeyValueStore(DetectionTopology.USER_STORE).get("acme|asha@example.test");
         JsonNode state = Json.MAPPER.readTree(stored);
         assertThat(state.at("/rules/bf@1/runs")).isNotEmpty();
+    }
+
+    @Test
+    void userAndIpRulesSideBySideBothFire() throws Exception {
+        var c = new RuleCompiler();
+        var set = new RuleSet(1, List.of(
+                new ActiveRule("spray", 1, "Spray", Severity.HIGH, c.compile("threshold login.failure >= 3 by ip within 5m")),
+                new ActiveRule("takeover", 1, "Takeover", Severity.HIGH, c.compile(
+                        "sequence login.failure{5,} then login.success where asn is new by user within 10m")),
+                new ActiveRule("travel", 1, "Travel", Severity.HIGH, c.compile("travel login.success by user faster than 900 kmh"))),
+                Map.of());
+        var d = newDriver(set);
+        var in = d.createInputTopic(Topics.RAW, new StringSerializer(), new StringSerializer());
+        var out = d.createOutputTopic(Topics.ALERTS, new StringDeserializer(), new StringDeserializer());
+        for (int i = 0; i < 6; i++) {
+            in.pipeInput("acme:z" + i, envelope("acme", "z" + i, 300 - i, "zed@example.test", "203.0.113.201", "failure"));
+        }
+        in.pipeInput("acme:zs", envelope("acme", "zs", 280, "zed@example.test", "203.0.113.201", "success"));
+        in.pipeInput("acme:r1", envelope("acme", "r1", 900, "ravi@example.test", "198.51.100.20", "success"));
+        in.pipeInput("acme:r2", envelope("acme", "r2", 300, "ravi@example.test", "203.0.113.50", "success"));
+        var rules = out.readValuesToList().stream().map(v -> {
+            try {
+                return Json.MAPPER.readValue(v, Signal.class).ruleId();
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        }).toList();
+        assertThat(rules).contains("spray", "takeover", "travel");
     }
 }
