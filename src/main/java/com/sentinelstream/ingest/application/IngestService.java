@@ -95,7 +95,7 @@ public class IngestService {
                     if (!dedup.claim(tenant, id, config.dedupTtl())) {
                         dups++;
                     } else {
-                        pending.add(new Pending(i, id, publisher.publish(tenant + ":" + id, env)));
+                        pending.add(new Pending(i, id, publisher.publish(partitionKey(tenant, ok.event()), env)));
                     }
                 }
             }
@@ -119,6 +119,24 @@ public class IngestService {
         return new BatchResult(ok, dups, bad, failed);
     }
 
+    /**
+     * The raw topic is keyed by user (else ip, else event id), not by event id. Detection repartitions by
+     * user and by ip, and a repartition only keeps the order its source partition had: keyed by id, one
+     * user's events were spread over every raw partition and reached the user detector interleaved, so a
+     * "five failures then a success" sequence could see the success first. Keyed by user, a user's events
+     * stay in arrival order end to end; ip-keyed state can still see users interleaved, which only matters
+     * for order-sensitive rules grouped by ip.
+     */
+    static String partitionKey(String tenant, com.sentinelstream.event.SecurityEvent e) {
+        if (e.user() != null) {
+            return tenant + "|u|" + e.user();
+        }
+        if (e.ip() != null) {
+            return tenant + "|ip|" + e.ip();
+        }
+        return tenant + ":" + e.id();
+    }
+
     /** Syslog has no reply channel: unparseable lines still go to the pipeline, which dead-letters them visibly. */
     public void ingestSyslog(String tenant, String line) {
         RawEnvelope env = RawEnvelope.syslog(tenant, clock.instant(), line);
@@ -128,7 +146,7 @@ public class IngestService {
                 duplicates.increment();
                 return;
             }
-            key = tenant + ":" + ok.event().id();
+            key = partitionKey(tenant, ok.event());
         }
         try {
             publisher.publish(key, env).get(10, TimeUnit.SECONDS);

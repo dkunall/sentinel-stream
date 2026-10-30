@@ -87,6 +87,35 @@ class PipelineIT extends ItBase {
                 .isEqualTo(1);
     }
 
+    /**
+     * Regression: with the raw topic keyed by event id, one user's batch was spread over every raw
+     * partition and reached the user detector out of order, so the success often came before the
+     * failures and the sequence never matched. The raw key is now the user.
+     */
+    @Test
+    void oneUsersBatchReachesTheSequenceDetectorInOrder() {
+        rule(acmeAdmin, "it-seq-in-order", "sequence login.failure{8,} then login.success by user within 10m", "HIGH");
+        Api collector = collector(acmeAdmin);
+        List<String> users = new ArrayList<>();
+        List<Map<String, Object>> batch = new ArrayList<>();
+        Instant t = Instant.now().minusSeconds(120);
+        for (int u = 0; u < 3; u++) {
+            String user = unique("seq") + "@example.test";
+            users.add(user);
+            for (int i = 0; i < 8; i++) {
+                batch.add(event(user, "203.0.113.20" + u, "login", "failure", t.plusSeconds(i)));
+            }
+            batch.add(event(user, "203.0.113.20" + u, "login", "success", t.plusSeconds(9)));
+        }
+        collector.post("/v1/events:batch", Map.of("events", batch)).expect(202);
+
+        await().atMost(Duration.ofSeconds(90)).untilAsserted(() -> {
+            for (String user : users) {
+                assertThat(alertsFor(acme, user, "it-seq-in-order")).as(user).hasSize(1);
+            }
+        });
+    }
+
     @Test
     void searchMasksPiiAndOnlyThePiiScopeMayAskForCleartext() {
         String user = unique("m") + "@example.test";
