@@ -1,0 +1,13 @@
+# Synthetic IP table for demos and tests. Every range here is reserved for documentation or
+# benchmarking (RFC 5737: 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24; RFC 2544: 198.18.0.0/15)
+# and every ASN is a documentation ASN (RFC 5398: 64496-64511). The cities are real places so the
+# impossible-travel distances mean something, but no real address resolves through this table.
+# cidr,country,city,lat,lon,asn,asn_org,network
+198.51.100.0/25,IN,Bengaluru,12.97,77.59,64496,Example Home Broadband,RESIDENTIAL
+198.51.100.128/25,IN,Mumbai,19.08,72.88,64497,Example Mobile Carrier,MOBILE
+198.18.0.0/16,IN,Delhi,28.61,77.21,64498,Example Corp Office,CORPORATE
+198.19.0.0/16,SG,Singapore,1.35,103.82,64499,Example Telecom SG,RESIDENTIAL
+203.0.113.0/25,DE,Frankfurt,50.11,8.68,64500,Example Hosting GmbH,HOSTING
+203.0.113.128/25,US,New York,40.71,-74.01,64501,Example VPN Exit,VPN
+192.0.2.0/24,BR,Sao Paulo,-23.55,-46.63,64502,Example Cloud Region,HOSTING
+10.0.0.0/8,,,,,,,PRIVATE
