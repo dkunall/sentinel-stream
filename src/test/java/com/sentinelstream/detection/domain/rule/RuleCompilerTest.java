@@ -6,6 +6,12 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -101,6 +107,34 @@ class RuleCompilerTest {
             assertThat(compile(dsl).spec()).isInstanceOf(RuleSpec.Sequence.class);
         } else {
             assertThatThrownBy(() -> compile(dsl)).hasMessageContaining("at most 8 steps");
+        }
+    }
+
+    @Test
+    void oneSharedCompilerParsesConcurrentRulesCorrectly() throws Exception {
+        RuleCompiler shared = new RuleCompiler();
+        int threads = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        try {
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<List<String>>> results = new ArrayList<>();
+            for (int t = 0; t < threads; t++) {
+                int n = 10 + t;
+                results.add(pool.submit(() -> {
+                    start.await();
+                    List<String> out = new ArrayList<>();
+                    for (int k = 0; k < 2000; k++) {
+                        out.add(shared.compile("threshold login.failure >= " + n + " by ip within 5m").canonical());
+                    }
+                    return out;
+                }));
+            }
+            start.countDown();
+            for (int t = 0; t < threads; t++) {
+                assertThat(results.get(t).get()).containsOnly("threshold login.failure >= " + (10 + t) + " by ip within 5m");
+            }
+        } finally {
+            pool.shutdownNow();
         }
     }
 }

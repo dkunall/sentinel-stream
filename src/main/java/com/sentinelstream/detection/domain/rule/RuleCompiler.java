@@ -24,15 +24,25 @@ import java.util.stream.Collectors;
  * newdevice login.success by user after 3
  * </pre>
  * The canonical text printed back from the parse tree is what gets hashed, so whitespace, keyword
- * case and comments do not change a rule's identity. Not thread-safe: use one instance per compile.
+ * case and comments do not change a rule's identity. Thread-safe: each call parses with its own token
+ * cursor, so one instance can be shared (an earlier version kept the cursor on the shared instance and
+ * concurrent saves corrupted each other's parse).
  */
 public final class RuleCompiler {
 
     private static final Set<String> IS_NEW_FIELDS = Set.of("asn", "country", "city", "device", "ip", "user", "network");
     private static final Duration MAX_WINDOW = Duration.ofDays(1);
 
-    private List<Lexer.Token> tokens;
+    private final List<Lexer.Token> tokens;
     private int at;
+
+    public RuleCompiler() {
+        this.tokens = List.of();
+    }
+
+    private RuleCompiler(List<Lexer.Token> tokens) {
+        this.tokens = tokens;
+    }
 
     public CompiledRule compile(String dsl) {
         if (dsl == null || dsl.isBlank()) {
@@ -41,8 +51,10 @@ public final class RuleCompiler {
         if (dsl.length() > 2000) {
             throw new RuleSyntaxException("rule longer than 2000 characters", 2000);
         }
-        tokens = Lexer.tokenize(dsl);
-        at = 0;
+        return new RuleCompiler(Lexer.tokenize(dsl)).parse();
+    }
+
+    private CompiledRule parse() {
         Lexer.Token head = next();
         RuleSpec spec = switch (head.text()) {
             case "sequence" -> sequence();
