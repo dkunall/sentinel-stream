@@ -1,0 +1,97 @@
+spring:
+  application:
+    name: sentinel-stream
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${SENTINEL_DB_URL:jdbc:postgresql://localhost:5432/sentinel}
+    username: ${SENTINEL_DB_USER:sentinel}
+    password: ${SENTINEL_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 16
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${SENTINEL_REDIS_HOST:localhost}
+      port: ${SENTINEL_REDIS_PORT:6379}
+      password: ${SENTINEL_REDIS_PASSWORD:}
+  kafka:
+    bootstrap-servers: ${SENTINEL_KAFKA:localhost:9092}
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        linger.ms: 5
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    listener:
+      ack-mode: record
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${SENTINEL_ISSUER:http://localhost:8080/default}
+  servlet:
+    multipart:
+      enabled: false
+
+server:
+  port: ${SENTINEL_PORT:8080}
+  shutdown: graceful
+  tomcat:
+    max-swallow-size: 1MB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    distribution:
+      percentiles:
+        sentinel.detection.latency: 0.5,0.95,0.99
+
+sentinel:
+  ingest:
+    max-batch: 500
+    max-body-bytes: 1048576
+    max-in-flight: 5000
+    dedup-ttl: 24h
+    max-event-age: 30d
+    max-clock-skew: 5m
+  syslog:
+    enabled: ${SENTINEL_SYSLOG_ENABLED:false}
+    bind: ${SENTINEL_SYSLOG_BIND:127.0.0.1}
+    port: ${SENTINEL_SYSLOG_PORT:5514}
+    tenant: ${SENTINEL_SYSLOG_TENANT:acme}
+  streams:
+    application-id: sentinel-detect
+    state-dir: ${SENTINEL_STATE_DIR:/tmp/sentinel-streams}
+    rules-poll: 2s
+    entity-idle-ttl: 7d
+  correlation:
+    incident-window: 30m
+  events:
+    retention-days: ${SENTINEL_RETENTION_DAYS:30}
+  playbooks:
+    poll: 1s
+  webhooks:
+    secret: ${SENTINEL_WEBHOOK_SECRET:}
+    allowed-hosts: localhost,127.0.0.1
+    poll: 1s
+  audit:
+    bucket: ${SENTINEL_AUDIT_BUCKET:sentinel-audit}
+    s3-endpoint: ${SENTINEL_S3_ENDPOINT:http://localhost:7070}
+    s3-access-key: ${SENTINEL_S3_ACCESS_KEY:}
+    s3-secret-key: ${SENTINEL_S3_SECRET_KEY:}
+    signing-key-pem: ${SENTINEL_AUDIT_SIGNING_KEY:}
+    retention-days: ${SENTINEL_AUDIT_RETENTION_DAYS:1}
+    seal-every: ${SENTINEL_AUDIT_SEAL_EVERY:30s}
+    max-batch: 1000
