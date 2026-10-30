@@ -34,6 +34,7 @@ class StreamsRunner implements SmartLifecycle, HealthIndicator {
     private final Duration idleTtl;
     private final KafkaAdmin admin;
     private volatile KafkaStreams streams;
+    private final ReplacementBudget budget = new ReplacementBudget();
 
     StreamsRunner(SentinelProperties props, Clock clock, EnricherChain enricher, RuleSets rules, KafkaAdmin admin,
                   @Value("${spring.kafka.bootstrap-servers}") String bootstrap) {
@@ -60,8 +61,15 @@ class StreamsRunner implements SmartLifecycle, HealthIndicator {
         admin.initialize();
         KafkaStreams ks = new KafkaStreams(DetectionTopology.build(normalizer, enricher, rules, idleTtl), config);
         ks.setUncaughtExceptionHandler(e -> {
-            log.error("stream thread failed, replacing it", e);
-            return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.REPLACE_THREAD;
+            if (budget.tryReplace(System.nanoTime())) {
+                log.error("stream thread failed, replacing it", e);
+                return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.REPLACE_THREAD;
+            }
+            // A failure that keeps coming back (a missing native library, a corrupt store) will not heal by
+            // retrying; stop the client so health and readiness go DOWN instead of reporting a busy loop as UP.
+            log.error("stream threads failed {} times within {}; shutting the detector down", ReplacementBudget.MAX,
+                    ReplacementBudget.WINDOW, e);
+            return StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
         });
         ks.start();
         streams = ks;

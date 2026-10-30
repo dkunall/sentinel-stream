@@ -53,6 +53,10 @@ management:
     health:
       probes:
         enabled: true
+      group:
+        readiness:
+          # not ready while the detector is down, so a broken stream topology fails the healthcheck
+          include: readinessState,streamsRunner
   metrics:
     distribution:
       percentiles:
