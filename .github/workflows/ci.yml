@@ -52,6 +52,7 @@ jobs:
           image-ref: sentinel-stream:local
           version: v0.69.3
           severity: CRITICAL,HIGH
+          trivyignores: .trivyignore
           ignore-unfixed: true
           exit-code: '1'
       - name: Compose smoke test
@@ -61,7 +62,7 @@ jobs:
           B=5 R=3 ./scripts/bench.sh
       - name: Compose logs
         if: failure()
-        run: docker compose --env-file "$SENTINEL_ENV_FILE" logs --tail 200
+        run: docker compose --env-file "$SENTINEL_ENV_FILE" logs --tail 200 || true
       - name: Tear down
         if: always()
         run: test -f "$SENTINEL_ENV_FILE" && docker compose --env-file "$SENTINEL_ENV_FILE" down -v || true

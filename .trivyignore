@@ -1,0 +1,5 @@
+# spring-webmvc 6.2.x has no open-source fix for these; the fixed line is 7.0.x (Spring Boot 4).
+# CVE-2026-47884 needs XsltView and CVE-2026-47890 needs view fragments streamed over SSE.
+# Sentinel Stream only returns JSON and problem details; it renders no views and opens no SSE streams.
+CVE-2026-47884
+CVE-2026-47890
