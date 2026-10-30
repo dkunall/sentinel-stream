@@ -75,7 +75,7 @@ The demo:
 mvn verify   # needs Docker for Testcontainers
 ```
 
-- **100 unit tests.** These cover the rule compiler, every detector, and property tests (jqwik) that check the NFA against a brute-force oracle, plus Aho-Corasick and Welford. They also cover the state machine, audit chain, PII masker, Streams topology (TopologyTestDriver) and the Streams thread-replacement budget, along with 3 ArchUnit rules.
+- **99 unit tests.** These cover the rule compiler, every detector, and property tests (jqwik) that check the NFA against a brute-force oracle, plus Aho-Corasick and Welford. They also cover the state machine, audit chain, PII masker, Streams topology (TopologyTestDriver) and the Streams thread-replacement budget, along with 3 ArchUnit rules.
 - **18 integration tests.** These run against real Postgres, Kafka, Redis and versitygw in Testcontainers. Between them they cover:
   - the pipeline from start to finish, a resend that changes nothing, and a regression test for per-user ordering;
   - a redelivered signal raced 8 times, which produces exactly one alert;
