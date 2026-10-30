@@ -1,0 +1,109 @@
+name: sentinel-stream
+
+# Secrets come from an env file that scripts/up.sh generates outside the repo; nothing here has a default.
+# Every published port binds to 127.0.0.1 only.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sentinel
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: ${SENTINEL_DB_PASSWORD:?run scripts/up.sh or set SENTINEL_DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinel"]
+      interval: 3s
+      retries: 30
+    volumes:
+      - db:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${SENTINEL_REDIS_PASSWORD:?set SENTINEL_REDIS_PASSWORD}
+      REDISCLI_AUTH: ${SENTINEL_REDIS_PASSWORD}
+    command: ["sh", "-c", "exec redis-server --save '' --appendonly no --requirepass \"$$REDIS_PASSWORD\""]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 20
+
+  kafka:
+    image: apache/kafka:3.8.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: -Xmx256m -Xms256m
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  # S3-compatible store with versioning and object lock, for the sealed audit batches.
+  s3:
+    image: versity/versitygw:v1.10.0
+    environment:
+      ROOT_ACCESS_KEY: ${SENTINEL_S3_ACCESS_KEY:?set SENTINEL_S3_ACCESS_KEY}
+      ROOT_SECRET_KEY: ${SENTINEL_S3_SECRET_KEY:?set SENTINEL_S3_SECRET_KEY}
+    command: ["posix", "--versioning-dir", "/vers", "/gw"]
+    tmpfs:
+      - /gw
+      - /vers
+
+  # Issues a token to any client_id. The client_id becomes the subject ("analyst@acme" -> tenant acme);
+  # the requested scope decides what the token may do.
+  oauth:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    environment:
+      SERVER_PORT: 8080
+      JSON_CONFIG: |
+        {"interactiveLogin": false, "tokenCallbacks": [{"issuerId": "sentinel", "tokenExpiry": 3600, "requestMappings": [
+            {"requestParam": "scope", "match": "sentinel.analyst", "claims": {"sub": "$${clientId}", "scope": "sentinel.analyst"}},
+            {"requestParam": "scope", "match": "sentinel.analyst sentinel.pii", "claims": {"sub": "$${clientId}", "scope": "sentinel.analyst sentinel.pii"}},
+            {"requestParam": "scope", "match": "sentinel.analyst sentinel.admin", "claims": {"sub": "$${clientId}", "scope": "sentinel.analyst sentinel.admin"}}
+        ]}]}
+    ports:
+      - "127.0.0.1:7991:8080"
+
+  app:
+    build: .
+    image: sentinel-stream:local
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      s3: { condition: service_started }
+      oauth: { condition: service_started }
+    environment:
+      SENTINEL_PORT: 7990
+      SENTINEL_DB_URL: jdbc:postgresql://db:5432/sentinel
+      SENTINEL_DB_PASSWORD: ${SENTINEL_DB_PASSWORD}
+      SENTINEL_REDIS_HOST: redis
+      SENTINEL_REDIS_PASSWORD: ${SENTINEL_REDIS_PASSWORD}
+      SENTINEL_KAFKA: kafka:9092
+      SENTINEL_ISSUER: http://oauth:8080/sentinel
+      SENTINEL_S3_ENDPOINT: http://s3:7070
+      SENTINEL_S3_ACCESS_KEY: ${SENTINEL_S3_ACCESS_KEY}
+      SENTINEL_S3_SECRET_KEY: ${SENTINEL_S3_SECRET_KEY}
+      SENTINEL_AUDIT_SIGNING_KEY: ${SENTINEL_AUDIT_SIGNING_KEY:?set SENTINEL_AUDIT_SIGNING_KEY}
+      SENTINEL_WEBHOOK_SECRET: ${SENTINEL_WEBHOOK_SECRET:?set SENTINEL_WEBHOOK_SECRET}
+      # Inside the container the listener must accept the published port; the host side stays on 127.0.0.1.
+      SENTINEL_SYSLOG_ENABLED: "true"
+      SENTINEL_SYSLOG_BIND: 0.0.0.0
+      SENTINEL_SYSLOG_PORT: 5514
+      JAVA_TOOL_OPTIONS: -Xmx512m -XX:+ExitOnOutOfMemoryError
+    ports:
+      - "127.0.0.1:7990:7990"
+      - "127.0.0.1:7992:5514"
+
+volumes:
+  db:
