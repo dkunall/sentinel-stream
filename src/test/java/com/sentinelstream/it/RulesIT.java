@@ -1,5 +1,6 @@
 package com.sentinelstream.it;
 
+import com.sentinelstream.support.Api;
 import com.sentinelstream.support.ItBase;
 import com.sentinelstream.support.Race;
 import org.junit.jupiter.api.Test;
@@ -27,10 +28,11 @@ class RulesIT extends ItBase {
         assertThat(acmeAdmin.post("/v1/rules", rule(id, 10)).expect(201).body().path("version").asInt()).isEqualTo(1);
         acmeAdmin.post("/v1/rules", rule(id, 10)).expect(200);
 
-        List<Integer> statuses = Race.run(6, i -> acmeAdmin.post("/v1/rules", rule(id, 20 + i)).status());
+        List<Api.Response> responses = Race.run(6, i -> acmeAdmin.post("/v1/rules", rule(id, 20 + i)));
+        List<Integer> statuses = responses.stream().map(Api.Response::status).toList();
         int created = Collections.frequency(statuses, 201);
         assertThat(created).isGreaterThanOrEqualTo(1);
-        assertThat(created + Collections.frequency(statuses, 409)).isEqualTo(6);
+        assertThat(created + Collections.frequency(statuses, 409)).as("responses %s", responses.stream().map(r -> r.status() + " " + r.body()).toList()).isEqualTo(6);
         List<Integer> versions = jdbc.queryForList("select version from rule where tenant_id = 'acme' and id = ? order by version",
                 Integer.class, id);
         assertThat(versions).hasSize(1 + created).doesNotHaveDuplicates();
