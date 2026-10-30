@@ -75,7 +75,7 @@ The demo:
 mvn verify   # needs Docker for Testcontainers
 ```
 
-- **99 unit tests.** These cover the rule compiler, every detector, and property tests (jqwik) that check the NFA against a brute-force oracle, plus Aho-Corasick and Welford. They also cover the state machine, audit chain, PII masker, Streams topology (TopologyTestDriver) and the Streams thread-replacement budget, along with 3 ArchUnit rules.
+- **100 unit tests.** These cover the rule compiler, every detector, and property tests (jqwik) that check the NFA against a brute-force oracle, plus Aho-Corasick and Welford. They also cover the state machine, audit chain, PII masker, Streams topology (TopologyTestDriver) and the Streams thread-replacement budget, along with 3 ArchUnit rules.
 - **18 integration tests.** These run against real Postgres, Kafka, Redis and versitygw in Testcontainers. Between them they cover:
   - the pipeline from start to finish, a resend that changes nothing, and a regression test for per-user ordering;
   - a redelivered signal raced 8 times, which produces exactly one alert;
@@ -105,7 +105,7 @@ How to read them:
 - Five samples per run is very few.
 - Most of the roughly 220 ms is probably Kafka Streams' exactly-once commit interval, not detection work. I have not profiled it.
 
-## Bugs the compose demo found
+## Bugs found along the way
 
 Two bugs got past every unit and Testcontainers test and only showed up when the full stack ran:
 
@@ -114,6 +114,12 @@ Two bugs got past every unit and Testcontainers test and only showed up when the
    - The uncaught-exception handler replaces a thread at most 5 times a minute and then shuts the client down.
    - Readiness now includes the Streams state.
 2. **Out-of-order events per user.** The raw topic was keyed by event id, so one user's batch was spread across every partition. The by-user repartition then interleaved it, and "five failures then a success" sometimes saw the success first. TopologyTestDriver runs a single partition, so it could not catch this. The raw topic is now keyed by user. `PipelineIT.oneUsersBatchReachesTheSequenceDetectorInOrder` failed before the fix and passes after it.
+
+A third bug showed up as a flaky test on a later local run:
+
+3. **Shared rule compiler.** `RulesIT` races six rule edits and expects each to return 201 or 409. Now and then one returned 400 "expected 'by'" for a valid rule. The parser kept its token cursor on a single compiler instance that the rule service shared between request threads, so concurrent saves read each other's tokens. Each compile now gets its own cursor. `RuleCompilerTest.oneSharedCompilerParsesConcurrentRulesCorrectly` (8 threads × 2000 compiles) fails on the old code and passes now. The IT also prints every response body when it fails.
+
+The first CI image scan also flagged `httpcore5` 5.3.6. It came in through the AWS SDK's `apache5-client`, which the app never uses because S3 goes through the URL-connection client, so that client is now excluded. Two spring-webmvc CVEs are ignored in `.trivyignore`, with the reason written there: the fix exists only in 7.x (Boot 4), and both CVEs need XSLT views or SSE fragments, which this app does not use.
 
 ## Limitations
 
